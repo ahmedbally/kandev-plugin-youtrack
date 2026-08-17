@@ -1,0 +1,114 @@
+id: "kandev-plugin-youtrack"
+api_version: 1
+version: "0.1.0"
+display_name: "YouTrack"
+description: "List YouTrack issues, start Kandev tasks from them, and link tasks to issues."
+author: "kdlbs"
+categories: ["connector"]
+repo_url: "https://github.com/kdlbs/kandev-plugin-youtrack"
+min_kandev_version: "0.78.0"
+
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin-linux-amd64"
+    linux-arm64: "server/plugin-linux-arm64"
+    darwin-amd64: "server/plugin-darwin-amd64"
+    darwin-arm64: "server/plugin-darwin-arm64"
+    windows-amd64: "server/plugin-windows-amd64.exe"
+
+capabilities:
+  api_read: ["tasks", "workflows", "workspaces", "repositories", "agent_profiles"]
+  api_write: ["tasks"]
+  state: true
+  secrets: true
+  user_state: true
+
+webhooks:
+  - key: "youtrack"
+    description: "YouTrack webhook receiver; create Kandev tasks from issue changes."
+    method: "POST"
+    access: public
+    max_body_bytes: 1048576
+
+actions:
+  - key: "connection.check"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "connection.save"
+    scope: "workspace"
+    max_body_bytes: 16384
+  - key: "connection.delete"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "projects.list"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "issues.list"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "issues.create_task"
+    scope: "workspace"
+    max_body_bytes: 16384
+  - key: "issues.link"
+    scope: "task"
+    max_body_bytes: 4096
+  - key: "issue.change_state"
+    scope: "task"
+    max_body_bytes: 4096
+  - key: "watches.list"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "watches.create"
+    scope: "workspace"
+    max_body_bytes: 8192
+  - key: "watches.update"
+    scope: "workspace"
+    max_body_bytes: 8192
+  - key: "watches.delete"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "watches.trigger"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "context.options"
+    scope: "workspace"
+    max_body_bytes: 1024
+
+agent_tools:
+  - name: search_issues
+    description: "Search YouTrack issues by query and return id, summary, and url."
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "YouTrack search query (YouTrack query language)."
+      required: [query]
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [issues]
+      properties:
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              idReadable: { type: string }
+              summary: { type: string }
+              url: { type: string }
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+
+ui:
+  bundle: "/ui/bundle.js"
+  keybindings:
+    - id: open-youtrack
+      default: mod+shift+y
+      description: "Open the YouTrack issues dashboard"

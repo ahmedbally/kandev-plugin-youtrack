@@ -1,0 +1,6 @@
+server/plugin-*
+*.exe
+*.tar.gz
+out/
+.kandev-dev/
+go.sum
