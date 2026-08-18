@@ -26,8 +26,7 @@ jobs:
       - name: Clone kandev for replace directive
         run: |
           git clone --depth 1 --branch v0.89.0 https://github.com/kdlbs/kandev.git ../kandev
-          # go.mod replace points to ../kandev/apps/backend
-          sed -i 's|../kandev|../kandev/apps/backend|' go.mod
+          sed -i 's|replace github.com/kandev/kandev => ../kandev|replace github.com/kandev/kandev => ../kandev/apps/backend|' go.mod
 
       - name: Download dependencies
         run: go mod download && go mod tidy
