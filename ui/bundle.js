@@ -77,13 +77,13 @@
           host.storage.get("workspace", wsId, "youtrack_enabled").then(function (entry) {
             var v = entry ? entry.value === true || entry.value === "true" : false;
             setEnabled(v);
-            if (v && typeof host.setIntegrationEnabled === "function") host.setIntegrationEnabled(wsId, true);
+            if (v && typeof host.setIntegrationEnabled === "function") host.setIntegrationEnabled("youtrack", wsId, true);
           }, function () { setEnabled(false); });
         }, [wsId]);
         var persist = function (next) {
           setEnabled(next);
           if (wsId) host.storage.set("workspace", wsId, "youtrack_enabled", next);
-          if (typeof host.setIntegrationEnabled === "function" && wsId) host.setIntegrationEnabled(wsId, next);
+          if (typeof host.setIntegrationEnabled === "function" && wsId) host.setIntegrationEnabled("youtrack", wsId, next);
         };
         return { enabled: enabled, setEnabled: persist };
       }
@@ -664,11 +664,11 @@
       // user visiting the YouTrack integration page first. ─────────────────
       safe(function () {
         try {
-          var items = (host.store.getState().workspaces && host.store.getState().workspaces.items) || [];
-          items.forEach(function (ws) {
-            host.storage.get("workspace", ws.id, "youtrack_enabled").then(function (entry) {
+          var ids = (typeof host.context.getWorkspaceIds === "function") ? host.context.getWorkspaceIds() : ((host.store.getState().workspaces && host.store.getState().workspaces.items) || []).map(function (ws) { return ws.id; });
+          ids.forEach(function (wsId) {
+            host.storage.get("workspace", wsId, "youtrack_enabled").then(function (entry) {
               if (entry && (entry.value === true || entry.value === "true")) {
-                if (typeof host.setIntegrationEnabled === "function") host.setIntegrationEnabled(ws.id, true);
+                if (typeof host.setIntegrationEnabled === "function") host.setIntegrationEnabled("youtrack", wsId, true);
               }
             }, function () {});
           });
