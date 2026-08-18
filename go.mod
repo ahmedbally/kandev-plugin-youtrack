@@ -4,8 +4,10 @@ go 1.26.0
 
 require (
 	github.com/google/go-cmp v0.7.0
-	github.com/kandev/kandev v0.0.0
+	github.com/kandev/kandev v0.89.0
 )
+
+replace github.com/kandev/kandev => github.com/kdlbs/kandev v0.89.0
 
 require (
 	github.com/fatih/color v1.13.0 // indirect
@@ -23,6 +25,3 @@ require (
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
-
-replace github.com/kandev/kandev => ../kandev-cloned/apps/backend
-
