@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Read version from manifest
+        id: version
+        run: |
+          VERSION=$(grep '^version:' manifest.yaml | sed 's/version: *"//' | sed 's/"//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version $VERSION"
+
+      - name: Build all platforms
+        run: |
+          mkdir -p server
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o server/plugin-linux-amd64    ./cmd/kandev-plugin-youtrack
+          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o server/plugin-linux-arm64    ./cmd/kandev-plugin-youtrack
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o server/plugin-darwin-amd64   ./cmd/kandev-plugin-youtrack
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o server/plugin-darwin-arm64   ./cmd/kandev-plugin-youtrack
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o server/plugin-windows-amd64.exe ./cmd/kandev-plugin-youtrack
+
+      - name: Package
+        run: |
+          mkdir -p package/ui package/server
+          cp manifest.yaml package/
+          cp README.md package/
+          cp ui/bundle.js package/ui/
+          cp server/plugin-linux-amd64 server/plugin-linux-arm64 server/plugin-darwin-amd64 server/plugin-darwin-arm64 server/plugin-windows-amd64.exe package/server/
+          cd package
+          find . -type f ! -name checksums.txt -exec sha256sum {} \; | sed 's|  \./|  |' | sort -k2 > checksums.txt
+          cd ..
+          tar -czf kandev-plugin-youtrack-${{ steps.version.outputs.version }}.tar.gz -C package .
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          files: kandev-plugin-youtrack-${{ steps.version.outputs.version }}.tar.gz
+          generate_release_notes: true
