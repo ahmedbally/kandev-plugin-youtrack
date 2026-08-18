@@ -23,6 +23,15 @@ jobs:
       - name: Configure git for kandev module
         run: git config --global url."https://github.com/kdlbs/kandev.git".insteadOf "https://github.com/kandev/kandev"
 
+      - name: Clone kandev for replace directive
+        run: |
+          git clone --depth 1 --branch v0.89.0 https://github.com/kdlbs/kandev.git ../kandev
+          # go.mod replace points to ../kandev/apps/backend
+          sed -i 's|../kandev|../kandev/apps/backend|' go.mod
+
+      - name: Download dependencies
+        run: go mod download && go mod tidy
+
       - name: Read version from manifest
         id: version
         run: |

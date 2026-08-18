@@ -3,4 +3,3 @@ server/plugin-*
 *.tar.gz
 out/
 .kandev-dev/
-go.sum
