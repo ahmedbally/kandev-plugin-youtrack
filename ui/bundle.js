@@ -70,7 +70,7 @@
       }
 
       function useYouTrackEnabled(wsId) {
-        var state = React.useState(false);
+        var state = React.useState(undefined);
         var enabled = state[0]; var setEnabled = state[1];
         React.useEffect(function () {
           if (!wsId) return;
@@ -95,6 +95,9 @@
       function YouTrackEnableToggle(props) {
         var wsId = (props && props.workspaceId) || getActiveWorkspaceId(host);
         var ctl = useYouTrackEnabled(wsId);
+        // Don't render the switch until the async storage read resolves —
+        // rendering it unchecked then flipping to checked causes a flicker.
+        if (ctl.enabled === undefined) return null;
         return jsx(ui.Switch, {
           checked: ctl.enabled,
           onCheckedChange: ctl.setEnabled,
@@ -250,7 +253,7 @@
           jsx("h2", { className: "text-lg font-semibold mt-4" }, "YouTrack is not configured"),
           jsx("p", { className: "text-sm text-muted-foreground mt-1" }, "Configure YouTrack in Settings > Integrations to start using it."),
           jsx(ui.Button, { className: "mt-4 cursor-pointer", onClick: function () { host.navigate(wsId ? "/settings/workspaces/" + wsId + "/integrations/youtrack" : "/settings/integrations/youtrack"); } }, "Configure YouTrack"));
-        if (!enabledCtl.enabled) return jsx("div", { className: "flex flex-col items-center justify-center py-20 text-center" },
+        if (!enabledCtl.enabled && enabledCtl.enabled !== undefined) return jsx("div", { className: "flex flex-col items-center justify-center py-20 text-center" },
           jsx(YouTrackIcon, { className: "h-10 w-10 text-muted-foreground" }),
           jsx("h2", { className: "text-lg font-semibold mt-4" }, "YouTrack is disabled"),
           jsx("p", { className: "text-sm text-muted-foreground mt-1" }, "Enable YouTrack in Settings > Integrations for this workspace."),
