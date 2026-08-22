@@ -1,11 +1,11 @@
 id: "kandev-plugin-youtrack"
 api_version: 1
-version: "0.1.0"
+version: "0.1.1"
 display_name: "YouTrack"
 description: "List YouTrack issues, start Kandev tasks from them, and link tasks to issues."
-author: "kdlbs"
+author: "ahmedbally"
 categories: ["connector"]
-repo_url: "https://github.com/kdlbs/kandev-plugin-youtrack"
+repo_url: "https://github.com/ahmedbally/kandev-plugin-youtrack"
 min_kandev_version: "0.78.0"
 
 runtime:
