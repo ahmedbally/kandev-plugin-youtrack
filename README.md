@@ -13,7 +13,7 @@ A Kandev external plugin that integrates YouTrack issue tracking with Kandev tas
 - **Optional inbound webhook**: point a YouTrack webhook at
   `https://<kandev>/api/plugins/kandev-plugin-youtrack/webhooks/youtrack` to create
   Kandev tasks automatically when issues match a configured query.
-- **Agent tool**: `kandev_youtrack_v0_1_0_search_issues` exposed to kanban-task agents
+- **Agent tool**: `kandev_youtrack_v0_1_1_search_issues` exposed to kanban-task agents
   so an agent working on a task can search YouTrack without leaving the session.
 
 ## Auth model
@@ -33,7 +33,7 @@ go build -o server/plugin-$(go env GOOS)-$(go env GOARCH) ./cmd/kandev-plugin-yo
 ## Package and install
 
 Use `kandev plugin-pack .` (or the `plugin-pack` tool from the kandev backend) to
-produce `kandev-plugin-youtrack-0.1.0.tar.gz`, then install it from
+produce `kandev-plugin-youtrack-0.1.1.tar.gz`, then install it from
 Settings → Plugins → Install.
 
 ## Repository layout
