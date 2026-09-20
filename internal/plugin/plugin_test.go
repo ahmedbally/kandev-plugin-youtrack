@@ -373,6 +373,11 @@ func (h *fakeHost) RevealSecret(_ context.Context, _ string) (string, error)    
 func (h *fakeHost) EmitEvent(_ context.Context, _ string, _ map[string]any) error     { return nil }
 
 type fakeTaskReader struct {
+	// Embedding the interface keeps the fake compilable against any SDK
+	// generation: methods this file doesn't define (e.g. Move, present only
+	// in newer kandev builds) delegate to the embedded nil interface and are
+	// never invoked by the tests.
+	pluginsdk.TaskReader
 	host *fakeHost
 }
 
@@ -393,10 +398,6 @@ func (r fakeTaskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput
 }
 
 func (r fakeTaskReader) Update(_ context.Context, _ pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (r fakeTaskReader) Move(_ context.Context, _ pluginsdk.MoveTaskInput) (*pluginsdk.MoveTaskOutcome, error) {
 	return nil, errors.New("not implemented")
 }
 

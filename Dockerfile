@@ -26,6 +26,14 @@ COPY kandev-plugin-youtrack /workspace/kandev-plugin-youtrack
 
 WORKDIR /workspace/kandev-plugin-youtrack
 
+# go.mod's replace directive points at ../kandev (how CI clones it). Inside
+# this image the backend lives at ../kandev-cloned/apps/backend — same rewrite
+# the release workflow applies. The working tree may carry CRLF line endings
+# (git autocrlf), which would defeat the $ anchor, so normalize first.
+RUN sed -i 's/\r$//' go.mod \
+    && sed -i 's|=> \.\./kandev$|=> ../kandev-cloned/apps/backend|' go.mod \
+    && grep '^replace' go.mod
+
 RUN go mod tidy
 
 RUN go vet ./...
@@ -45,5 +53,23 @@ COPY kandev-plugin-youtrack/README.md /out/README.md
 
 RUN ls -la /out/server/
 
+# Assemble the installable plugin package exactly like the release workflow:
+# manifest + README + ui bundle + all platform binaries + checksums.txt at the
+# tar root, then a versioned tar.gz (version read from manifest.yaml). The
+# working tree may carry CRLF line endings (git autocrlf), so strip \r from
+# the manifest and the extracted VERSION or the tarball name is corrupted.
+RUN sed -i 's/\r$//' manifest.yaml README.md \
+    && VERSION=$(grep '^version:' manifest.yaml | sed 's/version: *"//; s/"//; s/\r$//') \
+    && mkdir -p /dist/package/ui /dist/package/server \
+    && cp manifest.yaml README.md /dist/package/ \
+    && cp ui/bundle.js /dist/package/ui/ \
+    && cp /out/server/plugin-* /dist/package/server/ \
+    && cd /dist/package \
+    && find . -type f ! -name checksums.txt -exec sha256sum {} \; | sed 's|  \./|  |' | sort -k2 > checksums.txt \
+    && cd /dist \
+    && tar -czf "kandev-plugin-youtrack-${VERSION}.tar.gz" -C package . \
+    && echo "Packaged kandev-plugin-youtrack-${VERSION}.tar.gz"
+
 FROM scratch
 COPY --from=builder /out /
+COPY --from=builder /dist/*.tar.gz /

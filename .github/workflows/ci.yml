@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/kandev/*
+      GOPROXY: direct
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Configure git for kandev module
+        run: git config --global url."https://github.com/kdlbs/kandev.git".insteadOf "https://github.com/kandev/kandev"
+
+      - name: Clone kandev for replace directive
+        run: |
+          git clone --depth 1 --branch v0.89.0 https://github.com/kdlbs/kandev.git ../kandev
+          sed -i 's|replace github.com/kandev/kandev => ../kandev|replace github.com/kandev/kandev => ../kandev/apps/backend|' go.mod
+
+      - name: Download dependencies
+        run: go mod download && go mod tidy
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build (linux-amd64 smoke)
+        run: |
+          mkdir -p server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o server/plugin-linux-amd64 ./cmd/kandev-plugin-youtrack
