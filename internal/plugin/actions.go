@@ -429,6 +429,9 @@ func (p *Plugin) actionWatchesCreate(ctx context.Context, wsID string, req *plug
 		return errorResp(400, "max_inflight must be zero or a positive integer")
 	}
 	host := p.Host()
+	if host == nil {
+		return errorResp(500, "host unavailable")
+	}
 	repoID, branch, err := resolveRepositoryBinding(ctx, host, wsID, body.RepositoryID, body.BaseBranch)
 	if err != nil {
 		return errorResp(400, err.Error())
@@ -499,6 +502,9 @@ func (p *Plugin) actionWatchesUpdate(ctx context.Context, wsID string, req *plug
 		return errorResp(400, "max_inflight must be zero or a positive integer")
 	}
 	host := p.Host()
+	if host == nil {
+		return errorResp(500, "host unavailable")
+	}
 	watches, err := loadWatches(ctx, host, wsID)
 	if err != nil {
 		return errorRespFromAPI("load watches", err)

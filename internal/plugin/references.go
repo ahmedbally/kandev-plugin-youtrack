@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -24,6 +25,9 @@ var (
 	// ErrReferenceInvalidQuery mirrors Jira's ErrMentionInvalidQuery.
 	ErrReferenceInvalidQuery = errors.New("youtrack: invalid reference query")
 )
+
+// The plugin owns a complete reference source (search + authorize).
+var _ pluginsdk.EntityReferenceHandler = (*Plugin)(nil)
 
 // referenceIssueKeyPattern mirrors Jira's mentionIssueKeyPattern: YouTrack
 // readable IDs look like FPU-123 (project short name is letters/digits).
@@ -105,4 +109,88 @@ func (p *Plugin) SearchEntityReferences(ctx context.Context, req *pluginsdk.Sear
 		})
 	}
 	return &pluginsdk.SearchEntityReferencesResponse{Candidates: candidates}, nil
+}
+
+// Entity reference authorization purposes, mirroring the host's
+// mentions.ReferencePurposeSearch / ReferencePurposeSubmission values.
+const (
+	referencePurposeSearch     = "search"
+	referencePurposeSubmission = "submission"
+)
+
+var (
+	// referenceProvider / referenceKind must match the manifest's
+	// reference_sources provider and kind.
+	referenceProvider = "youtrack"
+	referenceKind     = "issue"
+)
+
+// deniedReference is a uniform "not allowed" answer, mirroring Jira's
+// ErrReferenceUnauthorized semantics: the host surfaces only allowed/not.
+func deniedReference(reason string) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
+	return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: reason}, nil
+}
+
+// AuthorizeEntityReference implements pluginsdk.EntityReferenceAuthorizer.
+// The host's mention bridge requires a live authorizer: search results are
+// filtered through it and every submission is re-checked, so a plugin that
+// only implements the searcher would have all its candidates dropped.
+//
+// Mirrors the built-in Jira provider's AuthorizeReference: validate the
+// canonical reference shape offline, then require the reference URL to point
+// at this workspace's configured YouTrack instance — a user-crafted
+// reference to a different instance (or a non-http URL) is rejected without
+// any YouTrack API call.
+func (p *Plugin) AuthorizeEntityReference(ctx context.Context, req *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
+	if req == nil {
+		return deniedReference("missing request")
+	}
+	wsID := strings.TrimSpace(req.WorkspaceID)
+	if wsID == "" || wsID != req.WorkspaceID {
+		return deniedReference("workspace required")
+	}
+	if req.Purpose != referencePurposeSearch && req.Purpose != referencePurposeSubmission {
+		return deniedReference("invalid purpose")
+	}
+	reference := req.Reference
+	if reference == nil {
+		return deniedReference("missing reference")
+	}
+	if stringField(reference, "provider") != referenceProvider || stringField(reference, "kind") != referenceKind {
+		return deniedReference("provider/kind mismatch")
+	}
+	// The bridge pre-checks scope; kept here as defense in depth, exactly like
+	// Jira's validJiraReferenceShape guards id/key shape.
+	if stringField(reference, "scope") != wsID {
+		return deniedReference("scope mismatch")
+	}
+	id := stringField(reference, "id")
+	key := stringField(reference, "key")
+	if id == "" || strings.TrimSpace(id) != id || key == "" || strings.TrimSpace(key) != key {
+		return deniedReference("invalid id/key shape")
+	}
+	cfg, err := p.loadConfig(ctx, wsID)
+	if err != nil {
+		return deniedReference("youtrack not configured for this workspace")
+	}
+	if !referenceURLPointsAtBase(stringField(reference, "url"), cfg.BaseURL) {
+		return deniedReference("reference URL does not match the configured YouTrack instance")
+	}
+	return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: true}, nil
+}
+
+// referenceURLPointsAtBase reports whether refURL has a valid http(s) shape
+// and the same scheme+host as the configured YouTrack base URL. Host compare
+// is case-insensitive per RFC 3986.
+func referenceURLPointsAtBase(refURL, baseURL string) bool {
+	parsedRef, err := url.Parse(refURL)
+	if err != nil || parsedRef.User != nil || parsedRef.Host == "" ||
+		(parsedRef.Scheme != "http" && parsedRef.Scheme != "https") {
+		return false
+	}
+	parsedBase, err := url.Parse(youtrack.NormalizeBaseURL(baseURL))
+	if err != nil || parsedBase.Host == "" {
+		return false
+	}
+	return parsedRef.Scheme == parsedBase.Scheme && strings.EqualFold(parsedRef.Host, parsedBase.Host)
 }
