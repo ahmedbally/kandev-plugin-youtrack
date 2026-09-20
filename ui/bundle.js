@@ -336,6 +336,22 @@
 
         function remove(w) { if (!window.confirm("Delete this watcher?")) return; host.api.invokeAction("watches.delete", { workspaceId: wsId, body: { id: w.id } }).then(load).catch(function (e) { host.toast && host.toast.error(String(e)); }); }
         function trigger(w) { setBusy(true); host.api.invokeAction("watches.trigger", { workspaceId: wsId, body: { id: w.id } }).then(function (r) { host.toast && host.toast.success(r.new_tasks > 0 ? "Created " + r.new_tasks + " new task(s)" : "No new matching issues"); }).catch(function (e) { host.toast && host.toast.error(String(e)); }).finally(function () { setBusy(false); }); }
+        // Reset — Jira ResetIssueWatch parity: preview how many tasks the watch
+        // created, confirm, cascade-delete them, wipe dedup state, re-import.
+        function resetWatch(w) {
+          setBusy(true);
+          host.api.invokeAction("watches.reset_preview", { workspaceId: wsId, body: { id: w.id } })
+            .then(function (preview) {
+              var count = (preview && preview.task_count) || 0;
+              var msg = "Reset this watcher? This permanently deletes " + count + " task(s) it created and re-imports currently-matching issues on the next poll.";
+              if (!window.confirm(msg)) return null;
+              return host.api.invokeAction("watches.reset", { workspaceId: wsId, body: { id: w.id } })
+                .then(function (r) { host.toast && host.toast.success("Watcher reset — deleted " + ((r && r.deleted_tasks) || 0) + " task(s)"); })
+                .then(load);
+            })
+            .catch(function (e) { host.toast && host.toast.error(String(e)); })
+            .finally(function () { setBusy(false); });
+        }
         function toggle(w, enabled) { host.api.invokeAction("watches.update", { workspaceId: wsId, body: { id: w.id, enabled: enabled } }).then(load).catch(function (e) { host.toast && host.toast.error(String(e)); }); }
 
         return jsx("section", { className: "space-y-4", "data-testid": "youtrack-watchers-section" },
@@ -372,6 +388,7 @@
                     jsx(ui.TableCell, { className: "text-right" },
                       jsx("div", { className: "inline-flex gap-1.5" },
                         jsx(ui.Button, { size: "sm", variant: "outline", disabled: busy, onClick: function () { trigger(w); }, className: "cursor-pointer" }, "Check now"),
+                        jsx(ui.Button, { size: "sm", variant: "outline", disabled: busy, onClick: function () { resetWatch(w); }, className: "cursor-pointer", "data-testid": "youtrack-watch-reset" }, "Reset"),
                         jsx(ui.Button, { size: "sm", variant: "outline", onClick: function () { setDialog({ mode: "edit", watch: w }); }, className: "cursor-pointer" }, "Edit"),
                         jsx(ui.Button, { size: "sm", variant: "destructive", onClick: function () { remove(w); }, className: "cursor-pointer" }, "Delete"))));
                 }))))),
@@ -547,9 +564,21 @@
         var savingState = React.useState(false); var saving = savingState[0]; var setSaving = savingState[1];
         var testingState = React.useState(false); var testing = testingState[0]; var setTesting = testingState[1];
         var testResultState = React.useState(null); var testResult = testResultState[0]; var setTestResult = testResultState[1];
+        // Copy-from-workspace (Jira CopyConfigToWorkspace parity): duplicate
+        // another workspace's YouTrack connection into this one.
+        var wsOptionsState = React.useState([]); var wsOptions = wsOptionsState[0]; var setWsOptions = wsOptionsState[1];
+        var copyFromState = React.useState(""); var copyFrom = copyFromState[0]; var setCopyFrom = copyFromState[1];
+        var copyingState = React.useState(false); var copying = copyingState[0]; var setCopying = copyingState[1];
 
         function loadConfig() { setLoading(true); host.api.invokeAction("connection.check", { workspaceId: wsId }).then(function (r) { setConfig(r); setForm(configToForm(r)); }).catch(function () {}).finally(function () { setLoading(false); }); }
         React.useEffect(function () { loadConfig(); }, [wsId]);
+        React.useEffect(function () {
+          try {
+            var items = (host.store.getState().workspaces && host.store.getState().workspaces.items) || [];
+            setWsOptions(items.map(function (ws) { return { id: ws.id, name: ws.name || ws.id }; }));
+          } catch (e) { setWsOptions([]); }
+        }, []);
+        var otherWorkspaces = wsOptions.filter(function (w) { return w.id !== wsId; });
 
         var baseline = configToForm(config);
         var revision = JSON.stringify(form);
@@ -585,6 +614,23 @@
               host.toast && host.toast.success("YouTrack configuration removed");
             })
             .catch(function (e) { host.toast && host.toast.error(String(e)); });
+        }
+        function handleCopyConfig() {
+          if (!copyFrom || copyFrom === wsId) return;
+          setCopying(true);
+          // The action's authorized workspaceId is the source; this page's
+          // workspace is the copy target.
+          host.api.invokeAction("connection.copy", { workspaceId: copyFrom, body: { target_workspace_id: wsId } })
+            .then(function () { return host.api.invokeAction("connection.check", { workspaceId: wsId }); })
+            .then(function (r) {
+              setConfig(r); setForm(configToForm(r)); setTestResult(null);
+              var src = wsOptions.find(function (w) { return w.id === copyFrom; });
+              setCopyFrom("");
+              host.toast && host.toast.success("Copied YouTrack configuration from " + ((src && src.name) || "other workspace"));
+              if (r.connected && !enabledCtl.enabled) { enabledCtl.setEnabled(true); }
+            })
+            .catch(function (e) { host.toast && host.toast.error(String(e)); })
+            .finally(function () { setCopying(false); });
         }
 
         var canSave = form.base_url !== "" && (form.permanent_token !== "" || hasToken);
@@ -631,6 +677,15 @@
                 jsx(ui.Button, { type: "button", variant: "outline", "data-testid": "youtrack-test", onClick: handleTest, disabled: testing || loading || !hasToken, className: "cursor-pointer" }, testing ? "Testing..." : "Test connection"),
                 jsx("span", { className: "flex-1" }),
                 hasConfig ? jsx(ui.Button, { type: "button", variant: "destructive", "data-testid": "youtrack-delete", onClick: handleDelete, className: "cursor-pointer" }, "Remove configuration") : null),
+              wsId && otherWorkspaces.length > 0 ? jsx(ui.Separator, null) : null,
+              wsId && otherWorkspaces.length > 0 ? jsx("div", { className: "flex flex-wrap items-center gap-2" },
+                jsx("span", { className: "text-sm text-muted-foreground" }, "Copy configuration from another workspace"),
+                jsx(ui.Select, { value: copyFrom, onValueChange: setCopyFrom },
+                  jsx(ui.SelectTrigger, { className: "w-[220px] h-8 text-xs cursor-pointer", "data-testid": "youtrack-copy-source" }, jsx(ui.SelectValue, { placeholder: "Select workspace" })),
+                  jsx(ui.SelectContent, null, otherWorkspaces.map(function (w) {
+                    return jsx(ui.SelectItem, { key: w.id, value: w.id, className: "cursor-pointer" }, w.name);
+                  }))),
+                jsx(ui.Button, { type: "button", variant: "outline", "data-testid": "youtrack-copy-config", onClick: handleCopyConfig, disabled: copying || !copyFrom || copyFrom === wsId, className: "cursor-pointer h-8 text-xs" }, copying ? "Copying..." : "Copy to this workspace")) : null,
               !useSave && dirty ? jsx("div", { className: "flex gap-2" },
                 jsx(ui.Button, { onClick: handleSave, disabled: saving || !canSave, className: "cursor-pointer" }, saving ? "Saving..." : "Save changes"),
                 jsx(ui.Button, { variant: "outline", onClick: handleReset, className: "cursor-pointer" }, "Reset")) : null)),

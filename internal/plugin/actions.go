@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -29,6 +30,8 @@ func (p *Plugin) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRe
 		return p.actionConnectionSave(ctx, wsID, req)
 	case "connection.delete":
 		return p.actionConnectionDelete(ctx, wsID)
+	case "connection.copy":
+		return p.actionConnectionCopy(ctx, wsID, req)
 	case "projects.list":
 		return p.actionProjectsList(ctx, wsID)
 	case "issues.list":
@@ -49,6 +52,10 @@ func (p *Plugin) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRe
 		return p.actionWatchesDelete(ctx, wsID, req)
 	case "watches.trigger":
 		return p.actionWatchesTrigger(ctx, wsID, req)
+	case "watches.reset_preview":
+		return p.actionWatchesResetPreview(ctx, wsID, req)
+	case "watches.reset":
+		return p.actionWatchesReset(ctx, wsID, req)
 	case "context.options":
 		return p.actionContextOptions(ctx, wsID)
 	default:
@@ -109,7 +116,68 @@ func (p *Plugin) actionConnectionDelete(ctx context.Context, wsID string) (*plug
 	_ = host.DeleteState(ctx, "workspace", wsID, stateKeyWatches)
 	_ = host.DeleteState(ctx, "workspace", wsID, stateKeyWatchTick)
 	_ = host.DeleteState(ctx, "workspace", wsID, stateKeySeenIssues)
+	_ = host.DeleteState(ctx, "workspace", wsID, stateKeyWatchTasks)
 	return jsonResp(map[string]any{"deleted": true})
+}
+
+// connectionCopyBody is the payload for connection.copy: the destination
+// workspace. The source is always the authorized caller's workspace (the
+// workspaceId on the request context), mirroring how Jira authorizes the
+// source via middleware and still validates the target from the body.
+type connectionCopyBody struct {
+	TargetWorkspaceID string `json:"target_workspace_id"`
+}
+
+// actionConnectionCopy duplicates the YouTrack connection settings and token
+// from the source workspace to a target workspace. Mirrors Jira's
+// CopyConfigToWorkspace: same-workspace copies and source workspaces without
+// a complete configuration are rejected; watchers are intentionally out of
+// scope — only the connection settings and secret are copied.
+func (p *Plugin) actionConnectionCopy(ctx context.Context, sourceWSID string, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	var body connectionCopyBody
+	if err := json.Unmarshal(req.Body, &body); err != nil {
+		return errorResp(400, "invalid body: "+err.Error())
+	}
+	target := strings.TrimSpace(body.TargetWorkspaceID)
+	if target == "" {
+		return errorResp(400, "target_workspace_id is required")
+	}
+	if target == sourceWSID {
+		return errorResp(400, "source and target workspaces are the same")
+	}
+	host := p.Host()
+	if host == nil {
+		return errorResp(500, "host unavailable")
+	}
+	value, found, err := host.GetState(ctx, "workspace", sourceWSID, stateKey)
+	if err != nil {
+		return errorRespFromAPI("read source youtrack config", err)
+	}
+	if !found || stringField(value, "base_url") == "" {
+		return errorResp(400, "source workspace has no configuration to copy")
+	}
+	token, tokenFound, err := host.GetSecret(ctx, secretKey(sourceWSID))
+	if err != nil {
+		return errorRespFromAPI("read source youtrack token", err)
+	}
+	if !tokenFound || token == "" {
+		// Copying a config without its token would leave the target pairing
+		// the copied base URL with its own old credential — treat as nothing
+		// to copy, exactly like Jira.
+		return errorResp(400, "source workspace has no stored token to copy")
+	}
+	targetState := map[string]any{
+		"base_url":        stringField(value, "base_url"),
+		"default_project": stringField(value, "default_project"),
+		"default_query":   stringField(value, "default_query"),
+	}
+	if err := host.SetState(ctx, "workspace", target, stateKey, targetState); err != nil {
+		return errorRespFromAPI("save target youtrack config", err)
+	}
+	if err := host.SetSecret(ctx, secretKey(target), token); err != nil {
+		return errorRespFromAPI("save target youtrack token", err)
+	}
+	return jsonResp(map[string]any{"copied": true, "base_url": targetState["base_url"]})
 }
 
 func (p *Plugin) actionProjectsList(ctx context.Context, wsID string) (*pluginsdk.PluginActionResponse, error) {
@@ -354,24 +422,31 @@ func (p *Plugin) actionWatchesCreate(ctx context.Context, wsID string, req *plug
 	if wsID == "" {
 		return errorResp(400, "workspaceId is required")
 	}
-	if body.Query == "" {
+	if strings.TrimSpace(body.Query) == "" {
 		return errorResp(400, "query is required")
 	}
+	if body.MaxInflight != nil && *body.MaxInflight < 0 {
+		return errorResp(400, "max_inflight must be zero or a positive integer")
+	}
 	host := p.Host()
+	repoID, branch, err := resolveRepositoryBinding(ctx, host, wsID, body.RepositoryID, body.BaseBranch)
+	if err != nil {
+		return errorResp(400, err.Error())
+	}
 	watches, err := loadWatches(ctx, host, wsID)
 	if err != nil {
 		return errorRespFromAPI("load watches", err)
 	}
 	w := Watch{
 		ID:                fmt.Sprintf("w_%d_%s", time.Now().UnixMilli(), randSuffix()),
-		Query:             body.Query,
+		Query:             strings.TrimSpace(body.Query),
 		Enabled:           body.Enabled == nil || *body.Enabled,
 		IntervalSeconds:   body.normalizedInterval(),
 		Prompt:            body.Prompt,
 		WorkflowID:        body.WorkflowID,
 		WorkflowStepID:    body.WorkflowStepID,
-		RepositoryID:      body.RepositoryID,
-		BaseBranch:        body.BaseBranch,
+		RepositoryID:      repoID,
+		BaseBranch:        branch,
 		AgentProfileID:    body.AgentProfileID,
 		ExecutorProfileID: body.ExecutorProfileID,
 		MaxInflight:       0,
@@ -420,6 +495,9 @@ func (p *Plugin) actionWatchesUpdate(ctx context.Context, wsID string, req *plug
 	if body.ID == "" {
 		return errorResp(400, "id is required")
 	}
+	if body.MaxInflight != nil && *body.MaxInflight < 0 {
+		return errorResp(400, "max_inflight must be zero or a positive integer")
+	}
 	host := p.Host()
 	watches, err := loadWatches(ctx, host, wsID)
 	if err != nil {
@@ -429,8 +507,9 @@ func (p *Plugin) actionWatchesUpdate(ctx context.Context, wsID string, req *plug
 		if watches[i].ID != body.ID {
 			continue
 		}
+		prevRepoID, prevBaseBranch := watches[i].RepositoryID, watches[i].BaseBranch
 		if body.Query != nil {
-			watches[i].Query = *body.Query
+			watches[i].Query = strings.TrimSpace(*body.Query)
 		}
 		if body.Enabled != nil {
 			watches[i].Enabled = *body.Enabled
@@ -462,12 +541,57 @@ func (p *Plugin) actionWatchesUpdate(ctx context.Context, wsID string, req *plug
 		if body.MaxInflight != nil {
 			watches[i].MaxInflight = *body.MaxInflight
 		}
+		// Post-patch guard, mirroring Jira's UpdateIssueWatch: an empty-string
+		// PATCH write must not blank the query the poller needs.
+		if watches[i].Query == "" {
+			return errorResp(400, "query cannot be empty")
+		}
+		// Only validate/resolve the binding when its value actually changed.
+		// Switching to a different repository without an explicit base branch
+		// resets the branch so the new repo's default is used instead of
+		// carrying the old repo's branch.
+		if watches[i].RepositoryID != prevRepoID && body.BaseBranch == nil {
+			watches[i].BaseBranch = ""
+		}
+		if watches[i].RepositoryID != prevRepoID || watches[i].BaseBranch != prevBaseBranch {
+			repoID, branch, bindErr := resolveRepositoryBinding(ctx, host, wsID, watches[i].RepositoryID, watches[i].BaseBranch)
+			if bindErr != nil {
+				return errorResp(400, bindErr.Error())
+			}
+			watches[i].RepositoryID = repoID
+			watches[i].BaseBranch = branch
+		}
 		if err := saveWatches(ctx, host, wsID, watches); err != nil {
 			return errorRespFromAPI("save watches", err)
 		}
 		return jsonResp(map[string]any{"watch": watchToMap(watches[i])})
 	}
 	return errorResp(404, "watch not found")
+}
+
+// resolveRepositoryBinding validates an optional repository binding against
+// the workspace's repositories and fills the base branch from the repository's
+// default branch when omitted — mirroring Jira's resolveRepositoryBinding. An
+// empty repositoryID unbinds the watch (the base branch is cleared with it).
+func resolveRepositoryBinding(ctx context.Context, host pluginsdk.Host, wsID, repoID, baseBranch string) (string, string, error) {
+	if strings.TrimSpace(repoID) == "" {
+		return "", "", nil
+	}
+	repos, _, err := host.Repositories().List(ctx, wsID, pluginsdk.Page{Limit: 100})
+	if err != nil {
+		return "", "", fmt.Errorf("list workspace repositories: %w", err)
+	}
+	for _, r := range repos {
+		if r.ID != repoID {
+			continue
+		}
+		branch := strings.TrimSpace(baseBranch)
+		if branch == "" && r.DefaultBranch != nil {
+			branch = *r.DefaultBranch
+		}
+		return r.ID, branch, nil
+	}
+	return "", "", fmt.Errorf("repository %q not found in workspace", repoID)
 }
 
 type watchIDBody struct {
@@ -502,6 +626,9 @@ func (p *Plugin) actionWatchesDelete(ctx context.Context, wsID string, req *plug
 	if err := saveWatches(ctx, host, wsID, out); err != nil {
 		return errorRespFromAPI("save watches", err)
 	}
+	// Cascade the watch's dedup state (tick, task list, seen-issue entries),
+	// mirroring Jira's DeleteIssueWatch store cascade.
+	pruneWatchDedupState(ctx, host, wsID, body.ID)
 	return jsonResp(map[string]any{"deleted": true})
 }
 
