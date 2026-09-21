@@ -1,6 +1,6 @@
 id: "kandev-plugin-youtrack"
 api_version: 1
-version: "0.1.1"
+version: "0.2.0"
 display_name: "YouTrack"
 description: "List YouTrack issues, start Kandev tasks from them, and link tasks to issues."
 author: "ahmedbally"
@@ -31,6 +31,14 @@ webhooks:
     access: public
     max_body_bytes: 1048576
 
+reference_sources:
+  - source: "youtrack_issues"
+    provider: "youtrack"
+    kind: "issue"
+    display_name: "YouTrack Issues"
+    kind_label: "YouTrack issue"
+    order: 60
+
 actions:
   - key: "connection.check"
     scope: "workspace"
@@ -39,6 +47,9 @@ actions:
     scope: "workspace"
     max_body_bytes: 16384
   - key: "connection.delete"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "connection.copy"
     scope: "workspace"
     max_body_bytes: 1024
   - key: "projects.list"
@@ -69,6 +80,12 @@ actions:
     scope: "workspace"
     max_body_bytes: 1024
   - key: "watches.trigger"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "watches.reset_preview"
+    scope: "workspace"
+    max_body_bytes: 1024
+  - key: "watches.reset"
     scope: "workspace"
     max_body_bytes: 1024
   - key: "context.options"

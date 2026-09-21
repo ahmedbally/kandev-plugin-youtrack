@@ -103,19 +103,24 @@ func loadTicks(ctx context.Context, host pluginsdk.Host, wsID string) tickBundle
 		return ticks
 	}
 	for k, val := range v {
-		if f, ok := val.(float64); ok {
-			ticks[k] = int64(f)
+		switch n := val.(type) {
+		case float64:
+			ticks[k] = int64(n)
+		case int64:
+			ticks[k] = n
+		case int:
+			ticks[k] = int64(n)
 		}
 	}
 	return ticks
 }
 
-func saveTicks(ctx context.Context, host pluginsdk.Host, wsID string, ticks tickBundle) {
+func saveTicks(ctx context.Context, host pluginsdk.Host, wsID string, ticks tickBundle) error {
 	out := map[string]any{}
 	for k, v := range ticks {
 		out[k] = v
 	}
-	_ = host.SetState(ctx, "workspace", wsID, stateKeyWatchTick, out)
+	return host.SetState(ctx, "workspace", wsID, stateKeyWatchTick, out)
 }
 
 func loadSeen(ctx context.Context, host pluginsdk.Host, wsID string) seenBundle {
@@ -132,12 +137,12 @@ func loadSeen(ctx context.Context, host pluginsdk.Host, wsID string) seenBundle 
 	return seen
 }
 
-func saveSeen(ctx context.Context, host pluginsdk.Host, wsID string, seen seenBundle) {
+func saveSeen(ctx context.Context, host pluginsdk.Host, wsID string, seen seenBundle) error {
 	out := map[string]any{}
 	for k, v := range seen {
 		out[k] = v
 	}
-	_ = host.SetState(ctx, "workspace", wsID, stateKeySeenIssues, out)
+	return host.SetState(ctx, "workspace", wsID, stateKeySeenIssues, out)
 }
 
 func loadWatchTasks(ctx context.Context, host pluginsdk.Host, wsID string) watchTasksBundle {
@@ -160,7 +165,7 @@ func loadWatchTasks(ctx context.Context, host pluginsdk.Host, wsID string) watch
 	return bundle
 }
 
-func saveWatchTasks(ctx context.Context, host pluginsdk.Host, wsID string, bundle watchTasksBundle) {
+func saveWatchTasks(ctx context.Context, host pluginsdk.Host, wsID string, bundle watchTasksBundle) error {
 	out := map[string]any{}
 	for k, ids := range bundle {
 		arr := make([]any, len(ids))
@@ -169,7 +174,7 @@ func saveWatchTasks(ctx context.Context, host pluginsdk.Host, wsID string, bundl
 		}
 		out[k] = arr
 	}
-	_ = host.SetState(ctx, "workspace", wsID, stateKeyWatchTasks, out)
+	return host.SetState(ctx, "workspace", wsID, stateKeyWatchTasks, out)
 }
 
 // StartPoller launches the background watch loop; it waits for Host injection
@@ -220,7 +225,7 @@ func pollWorkspace(ctx context.Context, p *Plugin, wsID string) {
 		changed = true
 	}
 	if changed {
-		saveTicks(ctx, host, wsID, ticks)
+		_ = saveTicks(ctx, host, wsID, ticks)
 	}
 }
 
@@ -324,8 +329,8 @@ func runWatch(ctx context.Context, p *Plugin, wsID string, w Watch) int {
 		created++
 	}
 	if created > 0 {
-		saveSeen(ctx, host, wsID, seen)
-		saveWatchTasks(ctx, host, wsID, taskBundle)
+		_ = saveSeen(ctx, host, wsID, seen)
+		_ = saveWatchTasks(ctx, host, wsID, taskBundle)
 	}
 	return created
 }

@@ -3,3 +3,5 @@ server/plugin-*
 *.tar.gz
 out/
 .kandev-dev/
+build-out/
+dist/

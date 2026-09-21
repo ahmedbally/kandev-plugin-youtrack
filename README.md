@@ -10,10 +10,24 @@ A Kandev external plugin that integrates YouTrack issue tracking with Kandev tas
   the task's description.
 - **Link an existing Kandev task to a YouTrack issue** from the task's Link menu.
 - **Change YouTrack issue state** from a linked task.
+- **Query watchers** poll a saved YouTrack query on a schedule and auto-create a
+  Kandev task per newly-matching issue, optionally bound to a repository
+  (validated against the workspace; base branch defaults to the repo's default
+  branch), workflow/step, agent/executor profile, and prompt with
+  `{key}`/`{url}`/`{title}`/`{description}` placeholders. Each watcher supports
+  an inflight cap, Check now, and **Reset** (cascade-deletes the tasks the
+  watcher created, wipes dedup state, and re-imports currently-matching issues
+  on the next poll — mirroring the built-in Jira integration).
+- **Copy configuration between workspaces**: duplicate the connection settings
+  and token from one workspace into another without re-entering the token.
+- **Composer references**: YouTrack issues are searchable as entity references
+  (`reference_sources`) so they can be mentioned in the composer; an
+  `FPU-123`-shaped query resolves the exact issue, anything else does a summary
+  search.
 - **Optional inbound webhook**: point a YouTrack webhook at
   `https://<kandev>/api/plugins/kandev-plugin-youtrack/webhooks/youtrack` to create
   Kandev tasks automatically when issues match a configured query.
-- **Agent tool**: `kandev_youtrack_v0_1_1_search_issues` exposed to kanban-task agents
+- **Agent tool**: `kandev_youtrack_v0_2_0_search_issues` exposed to kanban-task agents
   so an agent working on a task can search YouTrack without leaving the session.
 
 ## Auth model
@@ -33,7 +47,7 @@ go build -o server/plugin-$(go env GOOS)-$(go env GOARCH) ./cmd/kandev-plugin-yo
 ## Package and install
 
 Use `kandev plugin-pack .` (or the `plugin-pack` tool from the kandev backend) to
-produce `kandev-plugin-youtrack-0.1.1.tar.gz`, then install it from
+produce `kandev-plugin-youtrack-0.2.0.tar.gz`, then install it from
 Settings → Plugins → Install.
 
 ## Repository layout

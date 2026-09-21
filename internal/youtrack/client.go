@@ -46,10 +46,6 @@ type Client struct {
 }
 
 func New(baseURL, token string) *Client {
-	base := strings.TrimRight(baseURL, "/")
-	if base != "" && !strings.Contains(base, "://") {
-		base = "https://" + base
-	}
 	return &Client{
 		http: &http.Client{
 			Timeout: 30 * time.Second,
@@ -57,9 +53,19 @@ func New(baseURL, token string) *Client {
 				return http.ErrUseLastResponse
 			},
 		},
-		baseURL: base,
+		baseURL: NormalizeBaseURL(baseURL),
 		token:   token,
 	}
+}
+
+// NormalizeBaseURL trims trailing slashes and prefixes the https scheme when
+// the caller stored a bare host (e.g. "sallaops.youtrack.cloud").
+func NormalizeBaseURL(baseURL string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if base != "" && !strings.Contains(base, "://") {
+		base = "https://" + base
+	}
+	return base
 }
 
 func (c *Client) authorize(req *http.Request) {

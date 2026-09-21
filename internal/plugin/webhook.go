@@ -3,7 +3,6 @@ package plugin
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -56,26 +55,27 @@ func parseWebhookIssues(body []byte) ([]webhookIssue, error) {
 	if err := json.Unmarshal(body, &wrapper); err != nil {
 		return nil, err
 	}
-	var out []webhookIssue
+	var all []webhookIssue
 	if wrapper.Issue != nil {
-		out = append(out, *wrapper.Issue)
+		all = append(all, *wrapper.Issue)
 	}
 	for _, c := range wrapper.Changes {
 		if c.Issue != nil {
-			out = append(out, *c.Issue)
+			all = append(all, *c.Issue)
 		}
 	}
-	out = append(out, wrapper.Issues...)
+	all = append(all, wrapper.Issues...)
+	// YouTrack may report the same issue both as the top-level `issue` and
+	// inside `changes`; dedupe by id and drop entries without one — a payload
+	// entry without an id can never be linked back to YouTrack.
+	seen := make(map[string]bool, len(all))
+	out := make([]webhookIssue, 0, len(all))
+	for _, issue := range all {
+		if issue.ID == "" || seen[issue.ID] {
+			continue
+		}
+		seen[issue.ID] = true
+		out = append(out, issue)
+	}
 	return out, nil
-}
-
-func matchesWebhookQuery(ce webhookIssue, project string) bool {
-	if project == "" {
-		return true
-	}
-	if ce.FieldID != "" {
-		prefix := strings.ToUpper(project) + "-"
-		return strings.HasPrefix(strings.ToUpper(ce.FieldID), prefix)
-	}
-	return true
 }

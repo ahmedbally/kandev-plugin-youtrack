@@ -15,10 +15,7 @@ import (
 func newTestPlugin(t *testing.T, srvURL string) *Plugin {
 	t.Helper()
 	p := &Plugin{}
-	host := &fakeHost{
-		state: map[string]map[string]map[string]any{},
-		secrets: map[string]string{},
-	}
+	host := newFakeHost()
 	host.state["ws-1"] = map[string]map[string]any{
 		stateKey: {
 			"base_url":        srvURL,
@@ -304,9 +301,20 @@ func indexOf(s, sub string) int {
 
 type fakeHost struct {
 	pluginsdk.UnimplementedHostData
-	state   map[string]map[string]map[string]any
-	secrets map[string]string
-	creates []pluginsdk.CreateTaskInput
+	state        map[string]map[string]map[string]any
+	secrets      map[string]string
+	creates      []pluginsdk.CreateTaskInput
+	tasks        map[string]*pluginsdk.Task
+	repos        []pluginsdk.Repository
+	deletedTrees []string
+}
+
+func newFakeHost() *fakeHost {
+	return &fakeHost{
+		state:   map[string]map[string]map[string]any{},
+		secrets: map[string]string{},
+		tasks:   map[string]*pluginsdk.Task{},
+	}
 }
 
 func (h *fakeHost) GetState(_ context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
@@ -355,10 +363,21 @@ func (h *fakeHost) Workspaces() pluginsdk.WorkspaceReader { return fakeWorkflowR
 
 func (h *fakeHost) Workflows() pluginsdk.WorkflowReader { return fakeWorkflowReader{} }
 
+func (h *fakeHost) Repositories() pluginsdk.RepositoryReader { return fakeRepositoryReader{host: h} }
+
+func (h *fakeHost) PluginOwnedTaskTrees() pluginsdk.PluginOwnedTaskTreeManager {
+	return fakeTaskTreeManager{host: h}
+}
+
 func (h *fakeHost) RevealSecret(_ context.Context, _ string) (string, error)       { return "", errors.New("noop") }
 func (h *fakeHost) EmitEvent(_ context.Context, _ string, _ map[string]any) error     { return nil }
 
 type fakeTaskReader struct {
+	// Embedding the interface keeps the fake compilable against any SDK
+	// generation: methods this file doesn't define (e.g. Move, present only
+	// in newer kandev builds) delegate to the embedded nil interface and are
+	// never invoked by the tests.
+	pluginsdk.TaskReader
 	host *fakeHost
 }
 
@@ -366,8 +385,11 @@ func (r fakeTaskReader) List(_ context.Context, _ pluginsdk.TaskFilter, _ plugin
 	return nil, nil, errors.New("not implemented")
 }
 
-func (r fakeTaskReader) Get(_ context.Context, _ string) (*pluginsdk.Task, error) {
-	return nil, errors.New("not implemented")
+func (r fakeTaskReader) Get(_ context.Context, id string) (*pluginsdk.Task, error) {
+	if t, ok := r.host.tasks[id]; ok {
+		return t, nil
+	}
+	return nil, errors.New("not found")
 }
 
 func (r fakeTaskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*pluginsdk.Task, error) {
@@ -377,6 +399,30 @@ func (r fakeTaskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput
 
 func (r fakeTaskReader) Update(_ context.Context, _ pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
 	return nil, errors.New("not implemented")
+}
+
+type fakeRepositoryReader struct {
+	host *fakeHost
+}
+
+func (r fakeRepositoryReader) List(_ context.Context, _ string, _ pluginsdk.Page) ([]pluginsdk.Repository, *pluginsdk.PageInfo, error) {
+	return r.host.repos, &pluginsdk.PageInfo{}, nil
+}
+
+type fakeTaskTreeManager struct {
+	host *fakeHost
+}
+
+func (m fakeTaskTreeManager) Preview(_ context.Context, rootTaskID string) ([]pluginsdk.Task, error) {
+	if t, ok := m.host.tasks[rootTaskID]; ok {
+		return []pluginsdk.Task{*t}, nil
+	}
+	return nil, nil
+}
+
+func (m fakeTaskTreeManager) Delete(_ context.Context, rootTaskID string) ([]string, error) {
+	m.host.deletedTrees = append(m.host.deletedTrees, rootTaskID)
+	return []string{rootTaskID}, nil
 }
 
 type fakeWorkflowReader struct{}
